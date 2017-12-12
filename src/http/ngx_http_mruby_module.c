@@ -83,8 +83,10 @@ static char *ngx_http_mruby_exit_worker_inline(ngx_conf_t *cf, ngx_command_t *cm
 #if (NGX_HTTP_SSL)
 static char *ngx_http_mruby_ssl_handshake_phase(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_mruby_ssl_handshake_inline(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L
 static char *ngx_http_mruby_ssl_client_hello_phase(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_mruby_ssl_client_hello_inline(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+#endif
 #endif /* NGX_HTTP_SSL */
 static char *ngx_http_mruby_server_config_inline(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
