@@ -128,7 +128,7 @@ openssl: .openssl_build_done
 
 .openssl_build_done: .openssl_configure_done
 	(cd $(NGX_OPENSSL_SRC) \
-	&& $(MAKE) build_all install_sw) \
+	&& $(MAKE) ) \
 	&& cp /dev/null .openssl_build_done
 
 .openssl_configure_done:
