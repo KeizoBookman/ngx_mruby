@@ -61,6 +61,8 @@ typedef struct {
   ngx_mrb_state_t *state;
   ngx_mrb_code_t *ssl_handshake_code;
   ngx_mrb_code_t *ssl_handshake_inline_code;
+  ngx_mrb_code_t *ssl_verify_cookie_code;
+  ngx_mrb_code_t *ssl_verify_cookie_inline_code;
   ngx_mrb_code_t *server_config_inline_code;
   ngx_conf_t *cf;
   ngx_http_core_srv_conf_t *cscf;

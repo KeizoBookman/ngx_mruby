@@ -83,6 +83,8 @@ static char *ngx_http_mruby_exit_worker_inline(ngx_conf_t *cf, ngx_command_t *cm
 #if (NGX_HTTP_SSL)
 static char *ngx_http_mruby_ssl_handshake_phase(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_mruby_ssl_handshake_inline(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *ngx_http_mruby_ssl_verify_cookie_phase(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *ngx_http_mruby_ssl_verify_cookie_inline(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 #endif /* NGX_HTTP_SSL */
 static char *ngx_http_mruby_server_config_inline(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
@@ -138,11 +140,12 @@ static ngx_int_t ngx_http_mruby_log_inline_handler(ngx_http_request_t *r);
 #if OPENSSL_VERSION_NUMBER >= 0x1000205fL
 static int ngx_http_mruby_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data);
 #endif
+static int ngx_mruby_ssl_app_verify_cookie_handler(SSL *ssl, unsigned char *cookie, unsigned int cookie_len)
 #endif /* NGX_HTTP_SSL */
 
 #if defined(NDK) && NDK
-static ngx_int_t ngx_http_mruby_set_handler(ngx_http_request_t *r, ngx_str_t *val, ngx_http_variable_value_t *v,
-                                            void *data);
+    static ngx_int_t
+    ngx_http_mruby_set_handler(ngx_http_request_t *r, ngx_str_t *val, ngx_http_variable_value_t *v, void *data);
 static ngx_int_t ngx_http_mruby_set_inline_handler(ngx_http_request_t *r, ngx_str_t *val, ngx_http_variable_value_t *v,
                                                    void *data);
 #endif
@@ -174,6 +177,11 @@ static ngx_command_t ngx_http_mruby_commands[] = {
     {ngx_string("mruby_ssl_handshake_handler_code"), NGX_HTTP_SRV_CONF | NGX_CONF_TAKE1,
      ngx_http_mruby_ssl_handshake_inline, NGX_HTTP_SRV_CONF_OFFSET, 0, NULL},
 
+    {ngx_string("mruby_ssl_verify_cookie_handler"), NGX_HTTP_SRV_CONF | NGX_CONF_TAKE12,
+     ngx_http_mruby_ssl_verify_cookie_phase, NGX_HTTP_SRV_CONF_OFFSET, 0, NULL},
+
+    {ngx_string("mruby_ssl_verify_cookie_handler_code"), NGX_HTTP_SRV_CONF | NGX_CONF_TAKE1,
+     ngx_http_mruby_ssl_verify_cookie_inline, NGX_HTTP_SRV_CONF_OFFSET, 0, NULL},
 #endif /* NGX_HTTP_SSL */
 
     /* main config */
@@ -374,6 +382,8 @@ static void ngx_http_mruby_srv_conf_cleanup(void *data)
 
   NGX_MRUBY_CODE_MRBC_CONTEXT_FREE(mscf->state->mrb, mscf->ssl_handshake_code);
   NGX_MRUBY_CODE_MRBC_CONTEXT_FREE(mscf->state->mrb, mscf->ssl_handshake_inline_code);
+  NGX_MRUBY_CODE_MRBC_CONTEXT_FREE(mscf->state->mrb, mscf->ssl_verify_cookie_code);
+  NGX_MRUBY_CODE_MRBC_CONTEXT_FREE(mscf->state->mrb, mscf->ssl_verify_cookie_inline_code);
   NGX_MRUBY_CODE_MRBC_CONTEXT_FREE(mscf->state->mrb, mscf->server_config_inline_code);
 }
 
@@ -403,6 +413,8 @@ static void *ngx_http_mruby_create_srv_conf(ngx_conf_t *cf)
   mscf->cert_key_data.len = 0;
   mscf->ssl_handshake_code = NGX_CONF_UNSET_PTR;
   mscf->ssl_handshake_inline_code = NGX_CONF_UNSET_PTR;
+  mscf->ssl_verify_cookie_code = NGX_CONF_UNSET_PTR;
+  mscf->ssl_verify_cookie_inline_code = NGX_CONF_UNSET_PTR;
   mscf->server_config_inline_code = NGX_CONF_UNSET_PTR;
 
   cln->handler = ngx_http_mruby_srv_conf_cleanup;
@@ -422,8 +434,12 @@ static char *ngx_http_mruby_merge_srv_conf(ngx_conf_t *cf, void *parent, void *c
 
   NGX_MRUBY_MERGE_CODE(conf->ssl_handshake_code, prev->ssl_handshake_code);
   NGX_MRUBY_MERGE_CODE(conf->ssl_handshake_inline_code, prev->ssl_handshake_inline_code);
+  NGX_MRUBY_MERGE_CODE(conf->ssl_verify_cookie_code, prev->ssl_verify_cookie_code);
+  NGX_MRUBY_MERGE_CODE(conf->ssl_verify_cookie_inline_code, prev->ssl_verify_cookie_inline_code);
 
-  if (conf->ssl_handshake_code != NGX_CONF_UNSET_PTR || conf->ssl_handshake_inline_code != NGX_CONF_UNSET_PTR) {
+  if (conf->ssl_handshake_code != NGX_CONF_UNSET_PTR ||
+      conf->ssl_handshake_inline_code != NGX_CONF_UNSET_PTR conf->ssl_verify_cookie_code != NGX_CONF_UNSET_PTR ||
+      conf->ssl_verify_cookie_inline_code != NGX_CONF_UNSET_PTR) {
     sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
     if (sscf == NULL || sscf->ssl.ctx == NULL) {
       ngx_log_error(NGX_LOG_EMERG, cf->log, 0, MODULE_NAME " : no ssl configured for the server");
@@ -438,6 +454,7 @@ static char *ngx_http_mruby_merge_srv_conf(ngx_conf_t *cf, void *parent, void *c
                   " : mruby_ssl_handshake_handler : OpenSSL 1.0.2e or later required but found " OPENSSL_VERSION_TEXT);
     return NGX_CONF_ERROR;
 #endif
+    SSL_CTX_set_cookie_verify_cb(sscf->ssl.ctx, ngx_mruby_ssl_app_verify_cookie_handler);
   }
 
 #endif /* NGX_HTTP_SSL */
@@ -1150,6 +1167,28 @@ static char *ngx_http_mruby_ssl_handshake_inline(ngx_conf_t *cf, ngx_command_t *
   mscf->state = mmcf->state;
 
   return ngx_http_mruby_initialize_inline_code(cf, mmcf->state, &mscf->ssl_handshake_inline_code, __func__);
+}
+
+static char *ngx_http_mruby_ssl_verify_cookie_phase(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+  ngx_http_mruby_srv_conf_t *mscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_mruby_module);
+  ngx_http_mruby_main_conf_t *mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_mruby_module);
+
+  /* mmcf->state is initialized in ngx_http_mruby_preinit() */
+  mscf->state = mmcf->state;
+
+  return ngx_http_mruby_initialize_code(cf, mmcf->state, &mscf->ssl_verify_cookie_code, __func__);
+}
+
+static char *ngx_http_mruby_ssl_verify_cookie_inline(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+  ngx_http_mruby_srv_conf_t *mscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_mruby_module);
+  ngx_http_mruby_main_conf_t *mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_mruby_module);
+
+  /* mmcf->state is initialized in ngx_http_mruby_preinit() */
+  mscf->state = mmcf->state;
+
+  return ngx_http_mruby_initialize_inline_code(cf, mmcf->state, &mscf->ssl_verify_cookie_inline_code, __func__);
 }
 #endif /* NGX_HTTP_SSL */
 
@@ -2093,7 +2132,7 @@ NGX_MRUBY_SSL_ERROR:
 
 #endif /* NGX_HTTP_SSL */
 
-#if (NGX_HTTP_SSL) 
+#if (NGX_HTTP_SSL)
 
 #if OPENSSL_VERSION_NUMBER >= 0x1000205fL
 static int ngx_http_mruby_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
@@ -2222,4 +2261,57 @@ static int ngx_http_mruby_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
   return 1;
 }
 #endif /* 0x1000205fL */
+static int ngx_mruby_ssl_app_verify_cookie_handler(ngx_ssl_conn_t *ssl_conn, unsigned char *cookie,
+                                                   unsigned int cookie_len)
+{
+  ngx_connection_t *c;
+  ngx_http_connection_t *hc;
+  ngx_http_mruby_srv_conf_t *mscf;
+  mrb_int ai;
+#define ERRMSG_aPP_VERIFY_COOKIE_HANDLER MODULE_NAME " : mruby_ssl_verify_cookie_handler :"
+
+  c = ngx_ssl_get_connection(ssl_conn);
+  if (c == NULL) {
+    return 0;
+  }
+
+  hc = c->data;
+  if (hc == NULL) {
+    return 0;
+  }
+  mscf = ngx_http_get_module_srv_conf(hc->conf_ctx, ngx_http_mruby_module);
+  if (mscf == NULL) {
+    return 0;
+  }
+  if (mscf->ssl_verify_cookie_code != NGX_CONF_UNSET_PTR &&, mscf->ssl_verify_cookie_inline_code) {
+    return 0;
+  }
+  mscf->connection = c;
+  mrb->ud = mscf;
+  ai = mrb_gc_arena_save(mrb);
+  if (mscf->ssl_verify_cookie_code != NGX_CONF_UNSET_PTR) {
+    if (!mscf->ssl_verify_cookie_code->cache) {
+      ngx_rc_t rc;
+      rc = ngx_http_mruby_state_reinit_from_file(mrb, mscf->ssl_verify_cookie_code);
+      if (rc != NGX_OK) {
+      }
+      mrb_run(mrb, mscf->ssl_verify_cookie_code->proc, mrb_top_self(mrb));
+    }
+  }
+  if (mscf->ssl_verify_cookie_inline_code != NGX_CONF_UNSET_PTR) {
+    mrb_run(mrb, mscf->ssl_verify_cookie_inline_code->proc, mrb_top_self(mrb));
+  }
+  NGX_MRUBY_CODE_MRBC_CONTEXT_FREE(mrb, mscf->ssl_verify_cookie_code);
+  NGX_MRUBY_CODE_MRBC_CONTEXT_FREE(mrb, mscf->ssl_verify_cookie_inline_code);
+
+  if (mrb->exc) {
+    ngx_mrb_state_clean(NULL, mscf->state);
+    mrb_gc_arena_restore(mrb, ai);
+    return 0;
+  }
+
+  ngx_mrb_state_clean(NULL, mscf->state);
+  mrb_gc_arena_restore(mrb, ai);
+  return 1;
+}
 #endif /* NGX_HTTP_SSL */
