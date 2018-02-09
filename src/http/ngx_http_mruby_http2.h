@@ -1,0 +1,17 @@
+/*
+// ngx_http_mruby_http2.h - ngx_mruby mruby http2 header
+//
+// See Copyright Notice in ngx_http_mruby_module.c
+*/
+
+#ifndef NGX_HTTP_MRUBY_HTTP2_H
+#define NGX_HTTP_MRUBY_HTTP2_H
+
+#include <mruby.h>
+#include <mruby/hash.h>
+#include <mruby/variable.h>
+#include <ngx_http.h>
+
+
+#endif // NGX_HTTP_MRUBY_HTTP2_H
+

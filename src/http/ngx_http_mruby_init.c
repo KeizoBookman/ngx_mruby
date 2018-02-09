@@ -12,6 +12,7 @@
 #include "ngx_http_mruby_request.h"
 #include "ngx_http_mruby_server.h"
 #include "ngx_http_mruby_var.h"
+#include "ngx_http_mruby_http2.h"
 
 #include <mruby.h>
 #include <mruby/compile.h>
@@ -23,6 +24,7 @@ void ngx_mrb_var_class_init(mrb_state *mrb, struct RClass *calss);
 void ngx_mrb_conn_class_init(mrb_state *mrb, struct RClass *calss);
 void ngx_mrb_server_class_init(mrb_state *mrb, struct RClass *calss);
 void ngx_mrb_filter_class_init(mrb_state *mrb, struct RClass *calss);
+void ngx_mrb_http_v2_class_init(mrb_state *mrb, struct RClass *calss);
 #ifdef NGX_USE_MRUBY_UPSTREAM
 void ngx_mrb_upstream_class_init(mrb_state *mrb, struct RClass *calss);
 #endif
@@ -47,6 +49,8 @@ ngx_int_t ngx_mrb_class_init(mrb_state *mrb)
   ngx_mrb_server_class_init(mrb, class);
   GC_ARENA_RESTORE;
   ngx_mrb_filter_class_init(mrb, class);
+  GC_ARENA_RESTORE;
+  ngx_mrb_http_v2_class_init(mrb, class);
   GC_ARENA_RESTORE;
 #ifdef NGX_USE_MRUBY_UPSTREAM
   ngx_mrb_upstream_class_init(mrb, class);
