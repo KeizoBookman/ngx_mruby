@@ -554,7 +554,7 @@ t.assert('ngx_mruby - handlers while doing in SSL Handshake can run ruby code wi
   test_dir = File.expand_path(File.dirname(__FILE__))
   crt = "#{test_dir}/../client/client.crt"
   key = "#{test_dir}/../client/client.key"
-  `openssl s_client -cert #{crt} -key #{key} -connect localhost:58091 </dev/null 2>&1 > /dev/null`
+  `openssl s_client -cert #{crt} -key #{key} -servername test -connect localhost:58091 </dev/null 2>&1 > /dev/null`
   OPENSSL_S_CLIENT_EXIT_SUCCESS = 0
   rc = $?
   t.assert_equal OPENSSL_S_CLIENT_EXIT_SUCCESS, rc.to_i
